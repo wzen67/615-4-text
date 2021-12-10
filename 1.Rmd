@@ -1,0 +1,60 @@
+---
+title: '1'
+author: "Will Zen"
+date: "12/9/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+library(gutenbergr)
+library(knitr)
+library(scales)
+library(sentimentr)
+library(stringr)
+library(textdata)
+library(tidyr)
+library(tidytext)
+library(tidyverse)
+library(tnum)
+```
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+huck <- gutenberg_download(76)
+# #Remove stop words and make the dataset tidy
+data(stop_words)
+tidyhuck <- huck %>%
+unnest_tokens(word, text) %>%
+anti_join(stop_words)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# sentiment analysis by "bing" scale
+hucksentiment1 <- tidyhuck %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+sentiplot <- function(x){
+  ggplot(x, aes(index, sentiment)) +
+  geom_col(show.legend = FALSE) }
+sentiplot(hucksentiment1)
+# sentiment analysis by "afinn"
+hucksentiment2 <- tidyhuck %>%
+  inner_join(get_sentiments("afinn")) %>%
+  count(index = linenumber %/% 80, value) %>%
+  mutate(sentimentvalue = n*value) %>%
+  group_by(index) %>%
+  summarise(sentiment = sum(sentimentvalue))
+sentiplot(hucksentiment2)
+# sentiment analysis by "nrc"
+hucksentiment3 <- tidyhuck %>%
+  inner_join(get_sentiments("nrc")) %>%
+  count(index = linenumber %/% 80, sentiment) %>%
+  filter(sentiment %in% c("positive", "negative")) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+sentiplot(hucksentiment3)
+# inspired by kosuke sasaki
+```

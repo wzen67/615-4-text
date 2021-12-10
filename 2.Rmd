@@ -1,0 +1,126 @@
+---
+title: '2'
+author: "Will Zen"
+date: "12/9/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+library(gutenbergr)
+library(knitr)
+library(scales)
+library(sentimentr)
+library(stringr)
+library(textdata)
+library(tidyr)
+library(tidytext)
+library(tidyverse)
+library(tnum)
+```
+
+```{r echo = FALSE, message=FALSE, warning=FALSE}
+huck <- gutenberg_download(76)
+# #Remove stop words and make the dataset tidy
+data(stop_words)
+tidyhuck <- huck %>%
+unnest_tokens(word, text) %>%
+anti_join(stop_words)
+```
+
+```{r echo = FALSE, message=FALSE, warning=FALSE}
+tnum.authorize("mssp1.bu.edu")
+tnum.setSpace("test2")
+source("Book2TN-v6A-1.R")
+# run once
+# Convert the text columns into a text file
+# write_lines(huck$text, "huck.txt")
+# huck2 <- read_lines("huck.txt")
+# tnBooksFromLines(huck2, "twain/huck", 515)
+# tnum.getDBPathList(taxonomy = "subject", levels=2)
+
+# Extract all the text of the book excluding heading as a list
+wt <- tnum.query("twain/wz_huck_1/section:# has text", max=3000)
+#Turn the list into a data frame
+dft<- tnum.objectsToDf(wt)
+# Extract the location of each sentence as a list and change it as a data frame
+wo <- tnum.query("twain/wz_huck_1/section:# has ordinal", max=3000)
+dfo <- tnum.objectsToDf(wo)
+# Extract word counts of each sentence as a list and change it as a data frame
+wc <- tnum.query("twain/wz_huck_1/section:# has count:#", max=3000)
+dfc <- tnum.objectsToDf(wc) %>% rename(wordcounts=numeric.value)
+# Make the data frame of all the text, location,and wordcounts without heading
+text_locations <- left_join(select(dft, subject, string.value, tags),
+                            select(dfo, subject, numeric.value)) %>%
+                            left_join(select(dfc, subject, wordcounts))
+# Separate the subject column into "section", "paragraph" and "sentence"
+tnumtext <- text_locations %>%
+  separate(col = subject, sep = "/para", into = c("section", "para")) %>%
+  separate(col = section, sep = ":", into = c("out","section")) %>%
+  separate(col = para, sep = "/", into = c("pars","sent"))%>%
+  separate(col = pars, sep = ":", into = c("out1","paragraph"))%>%
+  separate(col = sent, sep = ":", into = c("out2","sentence"))%>%
+  rename(ordinal = numeric.value) %>% select(!c(out,out1,out2))
+#To do paragraph analysis, assign serial paragraph number
+tnumtext <- tnumtext %>% unite(col = "secpara", section, paragraph, remove= FALSE)
+paran <- nrow(distinct(tnumtext, secpara))
+a <- data.frame(secpara=distinct(tnumtext, secpara),
+                serialpara=c(1:paran))
+tnumtext <- left_join(tnumtext,a, by="secpara") %>% select(!"secpara")
+#remove tentative data set
+rm(a)
+#create tentative data frame
+sentimentvalue <- data.frame(NULL)
+#Calculate sentiment value for each paragraph
+for (i in 1:paran) {
+  paratext <- tnumtext %>% filter(serialpara == i) %>%
+    pull(string.value) %>% str_replace_all("\"","") %>%
+    str_flatten(collapse = " ")
+  parasentence <- get_sentences(paratext)
+  a <- sentiment_by(parasentence)
+  sentimentvalue <- rbind(sentimentvalue, a)
+}
+#Add paragraph column to "sentimentvalue" data frame
+sentimentvalue <- sentimentvalue %>%
+  mutate(paragraph=c(1:paran), method="SENTIMENTR") %>%
+  rename(sentiment=ave_sentiment) %>%
+  select(paragraph,sentiment,method)
+#remove tentative data set in the for loop
+rm(a,paratext,parasentence)# plot the sentiment values calculated by "sentimentr" through paragraphs
+sentimentvalue %>%
+  ggplot(aes(paragraph, sentiment)) +
+  geom_col(show.legend = FALSE)
+
+## comparison between sentimentr and lexicons as Paragraph-level Analysis
+
+# separate each line into words and make the tidy data frame of tnum
+tidytnumtext <- tnumtext %>%
+  unnest_tokens(word, string.value)
+# make data frame for sentiment analysis on "afinn" scale
+afinn2 <- tidytnumtext %>%
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(paragraph=serialpara) %>%
+  summarise(sentiment = sum(value)) %>%
+  mutate(method = "AFINN")
+# make data frame for sentiment analysis on "bing" scale as with "afinn" scale
+bing2 <- tidytnumtext %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(paragraph=serialpara, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)%>%
+  mutate(method = "BING")# make data frame for sentiment analysis on "nrc" scale as with "bing" scale
+nrc2 <- tidytnumtext %>%
+  inner_join(get_sentiments("nrc"))%>%
+  count(paragraph=serialpara, sentiment)%>%
+  filter(sentiment %in% c("positive", "negative"))%>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative) %>%
+  mutate(method = "NRC")# plot the sentiment values based on lexicons and sentimentr through paragraphs
+bind_rows(sentimentvalue, afinn2, bing2, nrc2) %>%
+  ggplot(aes(paragraph, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y")
+
+# inspired by kosuke sasaki
+```
